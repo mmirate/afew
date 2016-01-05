@@ -70,29 +70,8 @@ class MailMover(Database):
             main_query = self.query.format(folder=maildir, subquery=query)
             logging.debug("query: {}".format(main_query))
             messages = notmuch.Query(self.db, main_query).search_messages()
-            for message in messages:
-                # a single message (identified by Message-ID) can be in several
-                # places; only touch the one(s) that exists in this maildir 
-                all_message_fnames = message.get_filenames()
-                to_move_fnames = [name for name in all_message_fnames
-                                  if maildir in name]
-                if not to_move_fnames:
-                    continue
-                self.__log_move_action(message, maildir, rules[query],
-                                       self.dry_run)
-                for fname in to_move_fnames:
-                    if self.dry_run:
-                        continue
-                    try:
-                        shutil.copy2(fname, self.get_new_name(fname, destination))
-                        to_delete_fnames.append(fname)
-                    except shutil.Error as e:
-                        # this is ugly, but shutil does not provide more
-                        # finely individuated errors
-                        if str(e).endswith("already exists"):
-                            continue
-                        else:
-                            raise
+
+            to_delete_fnames += self.__move(messages, maildir, destination)
 
         # remove mail from source locations only after all copies are finished
         for fname in set(to_delete_fnames):
@@ -109,6 +88,33 @@ class MailMover(Database):
     #
     # private:
     #
+
+    def __move(self, messages, source, destination):
+        moved = []
+        for message in messages:
+            # a single message (identified by Message-ID) can be in several
+            # places; only touch the one(s) that exists in this maildir 
+            all_message_fnames = message.get_filenames()
+            to_move_fnames = [name for name in all_message_fnames
+                              if source in name]
+            if not to_move_fnames:
+                continue
+            self.__log_move_action(message, source, destination,
+                                   self.dry_run)
+            for fname in to_move_fnames:
+                if self.dry_run:
+                    continue
+                try:
+                    shutil.copy2(fname, self.get_new_name(fname, destination))
+                    moved.append(fname)
+                except shutil.Error as e:
+                    # this is ugly, but shutil does not provide more
+                    # finely individuated errors
+                    if str(e).endswith("already exists"):
+                        continue
+                    else:
+                        raise
+        return moved
 
     def __update_db(self, maildir):
         '''
@@ -136,4 +142,3 @@ class MailMover(Database):
         logging.log(level, "    {}".format(get_message_summary(message).encode('utf8')))
         logging.log(level, "from '{}' to '{}'".format(source, destination))
         #logging.debug("rule: '{}' in [{}]".format(tag, message.get_tags()))
-
